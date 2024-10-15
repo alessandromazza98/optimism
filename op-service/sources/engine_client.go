@@ -127,7 +127,36 @@ func (s *EngineAPIClient) ForkchoiceUpdate(ctx context.Context, fc *eth.Forkchoi
 // NewPayload executes a full block on the execution engine.
 // This returns a PayloadStatusV1 which encodes any validation/processing error,
 // and this type of error is kept separate from the returned `error` used for RPC errors, like timeouts.
-func (s *EngineAPIClient) NewPayload(ctx context.Context, payload *eth.ExecutionPayload, versionedHashes []common.Hash, parentBeaconBlockRoot *common.Hash) (*eth.PayloadStatusV1, error) {
+func (s *EngineAPIClient) NewPayload(ctx context.Context, payload *eth.ExecutionPayload, parentBeaconBlockRoot *common.Hash) (*eth.PayloadStatusV1, error) {
+	e := s.log.New("block_hash", payload.BlockHash)
+	e.Trace("sending payload for execution")
+
+	execCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	var result eth.PayloadStatusV1
+
+	var err error
+	switch method := s.evp.NewPayloadVersion(uint64(payload.Timestamp)); method {
+	case eth.NewPayloadV3:
+		err = s.RPC.CallContext(execCtx, &result, string(method), payload, []common.Hash{}, parentBeaconBlockRoot)
+	case eth.NewPayloadV2:
+		err = s.RPC.CallContext(execCtx, &result, string(method), payload)
+	default:
+		return nil, fmt.Errorf("unsupported NewPayload version: %s", method)
+	}
+
+	e.Trace("Received payload execution result", "status", result.Status, "latestValidHash", result.LatestValidHash, "message", result.ValidationError)
+	if err != nil {
+		e.Error("Payload execution failed", "err", err)
+		return nil, fmt.Errorf("failed to execute payload: %w", err)
+	}
+	return &result, nil
+}
+
+// NewPayload executes a full block on the execution engine.
+// This returns a PayloadStatusV1 which encodes any validation/processing error,
+// and this type of error is kept separate from the returned `error` used for RPC errors, like timeouts.
+func (s *EngineAPIClient) NewPayloadV3(ctx context.Context, payload *eth.ExecutionPayload, versionedHashes []common.Hash, parentBeaconBlockRoot *common.Hash) (*eth.PayloadStatusV1, error) {
 	e := s.log.New("block_hash", payload.BlockHash)
 	e.Trace("sending payload for execution")
 
